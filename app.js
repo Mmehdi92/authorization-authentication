@@ -7,8 +7,8 @@ import session from "express-session";
 import passport from "passport";
 import passportLocalMonogoose from "passport-local-mongoose";
 import GoogleStrategy from "passport-google-oauth20";
+import OutlookStrategy from "passport-outlook";
 import findOrCreate from "mongoose-findorcreate";
-
 
 const app = express();
 
@@ -39,6 +39,31 @@ passport.use(
       console.log(profile);
       User.findOrCreate({ googleId: profile.id }, function (err, user) {
         return cb(err, user);
+      });
+    }
+  )
+);
+
+passport.use(
+  new OutlookStrategy(
+    {
+      clientID: process.env.OUTLOOK_CLIENT_ID,
+      clientSecret: process.env.OUTLOOK_CLIENT_SECRET,
+      callbackURL: "http://localhost:3000/auth/outlook/secrets",
+      passReqToCallback: true,
+    },
+    function (req, accessToken, refreshToken, profile, done) {
+      var user = {
+        outlookId: profile.id,
+        name: profile.DisplayName,
+        email: profile.EmailAddress,
+        accessToken: accessToken,
+      };
+      if (refreshToken) user.refreshToken = refreshToken;
+      if (profile.MailboxGuid) user.mailboxGuid = profile.MailboxGuid;
+      if (profile.Alias) user.alias = profile.Alias;
+      User.findOrCreate(user, function (err, user) {
+        return done(err, user);
       });
     }
   )
@@ -79,10 +104,30 @@ app.get("/", (req, res) => {
   res.render("home");
 });
 
+app.get('/auth/outlook',
+  passport.authenticate('windowslive', {
+    scope: [
+      'openid',
+      'profile',
+      'offline_access',
+      'https://outlook.office.com/Mail.Read'
+    ]
+  })
+);
+
+
+app.get('/auth/outlook/secrets', 
+passport.authenticate('windowslive', { failureRedirect: '/login' }),
+function(req, res) {
+  // Successful authentication, redirect secret.
+  res.redirect('/secrets');
+});
+
 app.get(
   "/auth/google",
   passport.authenticate("google", { scope: ["profile"] })
 );
+
 
 app.get(
   "/auth/google/secrets",
