@@ -36,8 +36,8 @@ passport.use(
       userProfileUrl: "https://www.googleapis.com/oauth2/v3/userinfo",
     },
     function (accessToken, refreshToken, profile, cb) {
-      console.log(profile);
-      User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      // console.log(profile);
+      User.findOrCreate({ Id: profile.id }, function (err, user) {
         return cb(err, user);
       });
     }
@@ -54,7 +54,7 @@ passport.use(
     },
     function (req, accessToken, refreshToken, profile, done) {
       var user = {
-        outlookId: profile.id,
+        Id: profile.id,
         name: profile.DisplayName,
         email: profile.EmailAddress,
         accessToken: accessToken,
@@ -62,27 +62,35 @@ passport.use(
       if (refreshToken) user.refreshToken = refreshToken;
       if (profile.MailboxGuid) user.mailboxGuid = profile.MailboxGuid;
       if (profile.Alias) user.alias = profile.Alias;
-      User.findOrCreate({ outlookId: profile.id }, function (err, user) {
+      User.findOrCreate({ Id: profile.id }, function (err, user) {
         return done(err, user);
       });
     }
   )
 );
 
-
 mongoose.connect(process.env.DBCONNECTION);
-
+const secretSchema = new mongoose.Schema({
+  title: String
+})
 const userSchema = new mongoose.Schema({
-  outlookId: String,
-  googleId: String,
+  username: {
+    type:String,
+    unique: true,
+  },
+  Id: String,
   email: String,
   password: String,
+  secrets: {
+    type: Array
+  }
 });
 
 userSchema.plugin(passportLocalMonogoose);
 userSchema.plugin(findOrCreate);
 
 const User = new mongoose.model("User", userSchema);
+const Secret = new mongoose.model("Secret", secretSchema)
 
 passport.use(User.createStrategy());
 
@@ -106,30 +114,31 @@ app.get("/", (req, res) => {
   res.render("home");
 });
 
-app.get('/auth/outlook',
-  passport.authenticate('windowslive', {
+app.get(
+  "/auth/outlook",
+  passport.authenticate("windowslive", {
     scope: [
-      'openid',
-      'profile',
-      'offline_access',
-      'https://outlook.office.com/Mail.Read'
-    ]
+      "openid",
+      "profile",
+      "offline_access",
+      "https://outlook.office.com/Mail.Read",
+    ],
   })
 );
 
-
-app.get('/auth/outlook/secrets', 
-passport.authenticate('windowslive', { failureRedirect: '/login' }),
-function(req, res) {
-  // Successful authentication, redirect secret.
-  res.redirect('/secrets');
-});
+app.get(
+  "/auth/outlook/secrets",
+  passport.authenticate("windowslive", { failureRedirect: "/login" }),
+  function (req, res) {
+    // Successful authentication, redirect secret.
+    res.redirect("/secrets");
+  }
+);
 
 app.get(
   "/auth/google",
   passport.authenticate("google", { scope: ["profile"] })
 );
-
 
 app.get(
   "/auth/google/secrets",
@@ -140,11 +149,15 @@ app.get(
   }
 );
 
-app.get("/secrets", (req, res) => {
-  if (req.isAuthenticated()) {
-    res.render("secrets");
-  } else {
-    res.redirect("/login");
+app.get("/secrets", async (req, res) => {
+  try {
+    const allUsersWithSecrets = await User.find({ secrets: { $ne: [] } });
+    const allSecrets = allUsersWithSecrets.flatMap(user => user.secrets);
+    
+    res.render("secrets", { secrets: allSecrets });
+  } catch (error) {
+    console.log(error);
+    res.redirect("/");
   }
 });
 
@@ -209,4 +222,28 @@ app.post("/login", async (req, res) => {
       });
     }
   });
+});
+
+app.get("/submit", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.render("submit");
+  } else {
+    res.redirect("/login");
+  }
+});
+
+app.post("/submit", async (req, res) => {
+  const secret = req.body.secret;
+
+  try {
+    const foundUser = await User.findById(req.user.id);
+    if (foundUser) {
+     foundUser.secrets.push(secret)
+      await foundUser.save();
+    }
+  } catch (error) {
+    console.log(error);
+  }
+
+  res.redirect("/secrets");
 });
