@@ -62,16 +62,18 @@ passport.use(
       if (refreshToken) user.refreshToken = refreshToken;
       if (profile.MailboxGuid) user.mailboxGuid = profile.MailboxGuid;
       if (profile.Alias) user.alias = profile.Alias;
-      User.findOrCreate(user, function (err, user) {
+      User.findOrCreate({ outlookId: profile.id }, function (err, user) {
         return done(err, user);
       });
     }
   )
 );
 
+
 mongoose.connect(process.env.DBCONNECTION);
 
 const userSchema = new mongoose.Schema({
+  outlookId: String,
   googleId: String,
   email: String,
   password: String,
@@ -169,20 +171,27 @@ app.listen(3000, () => {
 });
 
 app.post("/register", async (req, res) => {
-  User.register(
-    { username: req.body.username },
-    req.body.password,
-    (err, user) => {
-      if (err) {
-        console.log(err);
-        res.redirect("/register");
-      } else {
-        passport.authenticate("local")(req, res, () => {
-          res.redirect("/secrets");
-        });
-      }
+  const newUser = {
+    // Other necessary fields like email, password, etc.
+  };
+
+  // Determine which authentication strategy was used
+  if (req.body.authStrategy === "google") {
+    newUser.googleId = req.body.profileId; // Use the appropriate field from the Google profile
+  } else if (req.body.authStrategy === "outlook") {
+    newUser.outlookId = req.body.profileId; // Use the appropriate field from the Outlook profile
+  }
+
+  User.register(newUser, req.body.password, (err, user) => {
+    if (err) {
+      console.log(err);
+      res.redirect("/register");
+    } else {
+      passport.authenticate("local")(req, res, () => {
+        res.redirect("/secrets");
+      });
     }
-  );
+  });
 });
 
 app.post("/login", async (req, res) => {
